@@ -1,6 +1,6 @@
 // Saves the app on your phone so it opens with no internet.
 // To force an update after you change index.html, change the number in CACHE.
-const CACHE = "study-timer-v1";
+const CACHE = "study-timer-v2";
 const FILES = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {
