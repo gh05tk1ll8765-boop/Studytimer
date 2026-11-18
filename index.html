@@ -82,10 +82,44 @@
     main { max-width:44rem; padding-top:1rem; gap:1.25rem; }
     #time { font-size:clamp(3rem,22vh,5.5rem); }
   }
+  .sheet { background:#fff; color:#222; border-radius:.6rem; overflow:hidden; padding-bottom:.6rem; }
+  .sheet h3 { background:#666; color:#fff; margin:0; padding:.8rem 1rem; font-size:1.15rem; text-align:center; }
+  .srow { display:flex; justify-content:space-around; padding:.8rem .4rem 0; }
+  .donut { text-align:center; font-size:.9rem; }
+  .donut small { display:block; color:#777; font-size:.7rem; }
+  .scroll { overflow-x:auto; padding:.5rem 0; }
+  .sh { border-collapse:collapse; font-size:.85rem; white-space:nowrap; }
+  .sh th { background:#8fcfa9; color:#1d3a2b; padding:.45rem .5rem; font-weight:600; border:1px solid #fff; }
+  .sh td { padding:.2rem .25rem; text-align:center; border:1px solid #eee; min-width:1.9rem; }
+  .sh .prog { background:#cdeadb; min-width:3.6rem; }
+  .sh .alt { background:#f3f3f3; }
+  .sh .first { position:sticky; left:0; background:#fff; min-width:9.5rem; text-align:left; z-index:1; }
+  .sh .alt .first { background:#f3f3f3; }
+  .sh th.first { background:#8fcfa9; text-align:center; }
+  .sh td.tdy { background:#e4f4ea; }
+  .nmw { display:flex; align-items:center; gap:.2rem; }
+  .sh input[type=checkbox] { width:1.2rem; height:1.2rem; accent-color:#2a9d63; margin:0; }
+  .sh input.nm { flex:1; min-width:0; border:0; background:transparent; color:#222; font:inherit; padding:.3rem .4rem; }
+  .sh input.add { color:#2a7a52; }
+  .sh input.tg { width:2.6rem; border:1px solid #ccc; border-radius:.3rem; background:#fff; color:#222; text-align:center; padding:.15rem; }
+  .sh .x { border:0; color:#999; padding:0 .3rem; }
+  [hidden] { display:none !important; }
+  .tabs { position:sticky; top:0; z-index:5; background:#000; display:flex; justify-content:center; gap:.6rem;
+    padding:calc(.6rem + env(safe-area-inset-top)) 1rem .6rem; border-bottom:1px solid var(--line); }
+  .tabs button { padding:.45rem 1.4rem; font-size:.95rem; }
+  .tabs button.on { background:var(--fg); color:#000; border-color:var(--fg); }
+  #paneTimer, #paneGoals { padding-top:1.25rem; }
+  #paneGoals { max-width:64rem; }
+  #paneGoals .donut svg { width:150px; height:150px; }
+  #paneGoals .sheet { padding-bottom:1rem; }
 </style>
 </head>
 <body>
-<main>
+<nav class="tabs" role="tablist">
+  <button id="tabTimer" class="on" role="tab" aria-selected="true">Timer</button>
+  <button id="tabGoals" role="tab" aria-selected="false">Goals</button>
+</nav>
+<main id="paneTimer">
   <div class="top"><button class="link" id="fs">Full screen</button></div>
   <div id="time">00:00:00</div>
   <div id="phase"></div>
@@ -186,6 +220,21 @@
     <button class="link" id="txtLink" style="margin-top:.6rem">Download didn't start?</button>
     <textarea id="txtBox" hidden readonly rows="5" style="width:100%;margin-top:.5rem;background:#000;color:#f2f2f2;border:1px solid #2a2a2a;border-radius:.6rem;padding:.6rem;font-size:.75rem"></textarea>
   </section>
+</main>
+<main id="paneGoals" hidden>
+  <section>
+    <div class="between" style="margin:0 0 .6rem"><button class="link" id="gPrev">‹ Prev</button><strong id="gTitle"></strong><button class="link" id="gNext">Next ›</button></div>
+    <div class="sheet">
+      <h3 id="sTitle"></h3>
+      <div class="srow"><div id="dDonut"></div><div id="wDonut"></div></div>
+      <div class="scroll" id="dChart"></div>
+      <div class="scroll" id="dTable"></div>
+      <div class="scroll" id="wTable"></div>
+      <div class="scroll" id="wChart"></div>
+    </div>
+    <div class="empty" style="margin-top:.6rem">Type in the last row of a table to add a goal. Tap a name or target to edit it.</div>
+  </section>
+
 </main>
 
 <script>
@@ -416,6 +465,7 @@
     $("time").textContent = text;
     $("phase").textContent = label;
     document.title = (r.on ? "▶ " : "") + text + (pomo ? " " + label : "") + " · Study timer";
+    $("tabTimer").textContent = r.on ? "Timer · " + text : "Timer";
     $("fill").style.width = Math.min(100, today / goal * 100) + "%";
     $("todayText").textContent = today >= goal ? hm(today) + " · goal reached" : hm(today) + " of " + hm(goal);
     var n = streak(map);
@@ -441,8 +491,133 @@
     list.forEach(function (n) { sel.appendChild(h("option", { text: n, value: n })); });
     sel.value = list.indexOf(cur) >= 0 ? cur : D.subject;
   }
+  // Goals tracker (spreadsheet style)
+  var gOff = 0, NS = "http://www.w3.org/2000/svg";
+  if (!Array.isArray(D.goals)) D.goals = [];
+  if (!D.checks || typeof D.checks !== "object") D.checks = {};
+  function sv(tag, a, t) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in a) e.setAttribute(k, a[k]);
+    if (t != null) e.textContent = t;
+    return e;
+  }
+  function ckey(g, i, ym, daily) { return g.id + "|" + (daily ? ym + "-" + pad(i) : ym + "|W" + i); }
+  function fill(id, node) { var el = $(id), x = el.scrollLeft; el.textContent = ""; el.appendChild(node); el.scrollLeft = x; }
+  function donut(label, done, tot) {
+    var p = tot ? done / tot : 0, r = 40, c = 2 * Math.PI * r, svg = sv("svg", { viewBox: "0 0 120 120", width: "120", height: "120" });
+    svg.appendChild(sv("circle", { cx: 60, cy: 60, r: r, fill: "none", stroke: "#bdbdbd", "stroke-width": 18 }));
+    if (p > 0) svg.appendChild(sv("circle", { cx: 60, cy: 60, r: r, fill: "none", stroke: "#8fcfa9", "stroke-width": 18, "stroke-dasharray": (c * p) + " " + c, transform: "rotate(-90 60 60)" }));
+    svg.appendChild(sv("text", { x: 60, y: 66, "text-anchor": "middle", "font-size": "18", fill: "#333" }, (p * 100).toFixed(1) + "%"));
+    return h("div", { "class": "donut" }, [h("div", { text: label }), svg, h("small", { text: "Done " + (p * 100).toFixed(1) + "% · Target " + ((1 - p) * 100).toFixed(1) + "%" })]);
+  }
+  function bars(title, list, doneOf) {
+    var W = Math.max(320, list.length * 100 + 20), H = 170, mx = 1;
+    list.forEach(function (g) { mx = Math.max(mx, g.target, doneOf(g)); });
+    var svg = sv("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H });
+    svg.appendChild(sv("text", { x: 10, y: 18, "font-size": "15", fill: "#222" }, title));
+    svg.appendChild(sv("rect", { x: W - 130, y: 8, width: 10, height: 10, fill: "#bdbdbd" }));
+    svg.appendChild(sv("text", { x: W - 116, y: 17, "font-size": "11", fill: "#555" }, "Target"));
+    svg.appendChild(sv("rect", { x: W - 66, y: 8, width: 10, height: 10, fill: "#8fcfa9" }));
+    svg.appendChild(sv("text", { x: W - 52, y: 17, "font-size": "11", fill: "#555" }, "Done"));
+    list.forEach(function (g, i) {
+      var x = i * 100 + 14, base = H - 26, sc = (base - 40) / mx, t = g.target, d = doneOf(g);
+      svg.appendChild(sv("rect", { x: x, y: base - t * sc, width: 34, height: t * sc, fill: "#bdbdbd" }));
+      svg.appendChild(sv("rect", { x: x + 36, y: base - d * sc, width: 34, height: d * sc, fill: "#8fcfa9" }));
+      svg.appendChild(sv("text", { x: x + 17, y: base - t * sc - 4, "text-anchor": "middle", "font-size": "11", fill: "#333" }, t));
+      svg.appendChild(sv("text", { x: x + 53, y: base - d * sc - 4, "text-anchor": "middle", "font-size": "11", fill: "#2a9d63" }, d));
+      svg.appendChild(sv("text", { x: x + 35, y: H - 8, "text-anchor": "middle", "font-size": "11", fill: "#333" }, g.name.length > 13 ? g.name.slice(0, 12) + "…" : g.name));
+    });
+    return svg;
+  }
+  function goalTable(list, daily, ym, days, todayKey, cnt) {
+    var n = daily ? days : 5, t = h("table", { "class": "sh" }), hr = h("tr", {});
+    var heads = [daily ? "Daily Goals" : "Weekly Goals", "Progress", "Goal Target"];
+    for (var i = 1; i <= n; i++) heads.push(daily ? String(i) : "W" + i);
+    if (!daily) heads.push("Done");
+    heads.forEach(function (x, j) { hr.appendChild(h("th", { text: x, "class": j === 0 ? "first" : "" })); });
+    t.appendChild(h("thead", {}, [hr]));
+    var body = h("tbody", {});
+    list.forEach(function (g, ri) {
+      var tds = [];
+      for (var i = 1; i <= n; i++) {
+        var k = ckey(g, i, ym, daily), cb = h("input", { type: "checkbox", "aria-label": g.name + (daily ? " day " : " week ") + i });
+        cb.checked = !!D.checks[k];
+        cb.addEventListener("change", (function (k, cb) { return function () { if (cb.checked) D.checks[k] = 1; else delete D.checks[k]; save(); renderGoals(); }; })(k, cb));
+        tds.push(h("td", { "class": daily && ym + "-" + pad(i) === todayKey ? "tdy" : "" }, [cb]));
+      }
+      var done = cnt(g), pct = g.target > 0 ? Math.min(100, Math.round(done / g.target * 100)) : 0;
+      var nm = h("input", { type: "text", value: g.name, maxlength: "40", "aria-label": "Goal name", "class": "nm" });
+      nm.addEventListener("change", function () { var v = nm.value.trim(); if (v) { g.name = v; save(); } renderGoals(); });
+      var tg = h("input", { type: "number", min: "1", value: String(g.target), inputmode: "numeric", "aria-label": "Goal target", "class": "tg" });
+      tg.addEventListener("change", function () { var v = parseInt(tg.value, 10); if (v > 0) { g.target = v; save(); } renderGoals(); });
+      var del = h("button", { "class": "x", text: "×", "aria-label": "Delete goal", onclick: function () {
+        if (!confirm('Delete "' + g.name + '" and its ticks?')) return;
+        D.goals = D.goals.filter(function (y) { return y.id !== g.id; });
+        Object.keys(D.checks).forEach(function (k) { if (k.indexOf(g.id + "|") === 0) delete D.checks[k]; });
+        save(); renderGoals();
+      } });
+      var tr = h("tr", { "class": ri % 2 ? "alt" : "" }, [
+        h("td", { "class": "first" }, [h("div", { "class": "nmw" }, [nm, del])]),
+        h("td", { "class": "prog", text: pct + "%" }),
+        h("td", {}, [tg])
+      ].concat(tds));
+      if (!daily) tr.appendChild(h("td", { "class": "prog", text: String(done) }));
+      body.appendChild(tr);
+    });
+    var add = h("input", { type: "text", maxlength: "40", placeholder: "+ Add a goal", "class": "nm add", "aria-label": "Add a " + (daily ? "daily" : "weekly") + " goal" });
+    add.addEventListener("change", function () {
+      var v = add.value.trim(); add.value = ""; if (!v) return;
+      D.goals.push({ id: String(uid()), name: v, type: daily ? "daily" : "weekly", target: daily ? 20 : 3 });
+      save(); renderGoals();
+    });
+    body.appendChild(h("tr", {}, [h("td", { "class": "first" }, [add]), h("td", { "class": "prog" }), h("td", {})]));
+    t.appendChild(body);
+    return t;
+  }
+  function renderGoals() {
+    var n0 = new Date(), first = new Date(n0.getFullYear(), n0.getMonth() + gOff, 1);
+    var ym = first.getFullYear() + "-" + pad(first.getMonth() + 1);
+    var days = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate(), todayKey = dayKey(Date.now());
+    $("gTitle").textContent = first.toLocaleDateString([], { month: "long", year: "numeric" });
+    $("sTitle").textContent = first.toLocaleDateString([], { month: "long" }) + " Personal Goals Tracker";
+    $("gNext").disabled = gOff >= 0;
+    var dl = D.goals.filter(function (g) { return g.type === "daily"; }), wl = D.goals.filter(function (g) { return g.type === "weekly"; });
+    function cnt(g) { var d = g.type === "daily", n = d ? days : 5, c = 0; for (var i = 1; i <= n; i++) if (D.checks[ckey(g, i, ym, d)]) c++; return c; }
+    function sum(l) { var a = 0, b = 0; l.forEach(function (g) { a += Math.min(cnt(g), g.target); b += g.target; }); return [a, b]; }
+    var ds = sum(dl), ws = sum(wl);
+    fill("dDonut", donut("Daily Progress", ds[0], ds[1]));
+    fill("wDonut", donut("Weekly Progress", ws[0], ws[1]));
+    fill("dChart", dl.length ? bars("Daily Goals", dl, cnt) : h("span"));
+    fill("dTable", goalTable(dl, true, ym, days, todayKey, cnt));
+    fill("wTable", goalTable(wl, false, ym, days, todayKey, cnt));
+    fill("wChart", wl.length ? bars("Weekly Goals", wl, cnt) : h("span"));
+  }
+  $("gPrev").addEventListener("click", function () { gOff--; renderGoals(); });
+  $("gNext").addEventListener("click", function () { if (gOff < 0) { gOff++; renderGoals(); } });
+
+  // Tabs: tap, or swipe left/right (swipes that start on a table, chart or input are ignored)
+  function showTab(t) {
+    $("paneTimer").hidden = t !== "timer"; $("paneGoals").hidden = t !== "goals";
+    $("tabTimer").className = t === "timer" ? "on" : ""; $("tabGoals").className = t === "goals" ? "on" : "";
+    $("tabTimer").setAttribute("aria-selected", t === "timer"); $("tabGoals").setAttribute("aria-selected", t === "goals");
+    window.scrollTo(0, 0);
+  }
+  $("tabTimer").addEventListener("click", function () { showTab("timer"); });
+  $("tabGoals").addEventListener("click", function () { showTab("goals"); });
+  var tx = 0, ty = 0, tOk = false;
+  document.addEventListener("touchstart", function (e) {
+    var t = e.touches[0]; tx = t.clientX; ty = t.clientY;
+    tOk = e.touches.length === 1 && !e.target.closest(".scroll, input, select, textarea");
+  }, { passive: true });
+  document.addEventListener("touchend", function (e) {
+    if (!tOk) return; tOk = false;
+    var t = e.changedTouches[0], dx = t.clientX - tx, dy = t.clientY - ty;
+    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.8) showTab(dx < 0 ? "goals" : "timer");
+  }, { passive: true });
+
   function renderLists() {
     lastChartKey = "";
+    renderGoals();
     var mode = curMode();
     Array.prototype.forEach.call(document.querySelectorAll("#modeBox button"), function (b) {
       b.className = "chip" + (b.getAttribute("data-m") === mode ? " on" : "");
@@ -623,7 +798,7 @@
   }
   function markBackup() { D.lastBackup = Date.now(); save(); showBackup(); }
   function backupJson() {
-    return JSON.stringify({ sessions: D.sessions, subjects: D.subjects, goalMin: D.goalMin });
+    return JSON.stringify({ sessions: D.sessions, subjects: D.subjects, goalMin: D.goalMin, goals: D.goals, checks: D.checks });
   }
   $("exp").addEventListener("click", function () {
     var name = "study-timer-backup-" + dayKey(Date.now()) + ".json";
@@ -671,6 +846,8 @@
         var have = {}, added = 0;
         D.sessions.forEach(function (x) { have[x.id] = 1; });
         b.sessions.forEach(function (x) { if (x && x.id && !have[x.id]) { D.sessions.push(x); added++; } });
+        (b.goals || []).forEach(function (g) { if (g && g.id && !D.goals.some(function (y) { return y.id === g.id; })) D.goals.push(g); });
+        Object.keys(b.checks || {}).forEach(function (k) { D.checks[k] = 1; });
         D.sessions.sort(function (a, c) { return a.start - c.start; });
         (b.subjects || []).forEach(function (n) { if (D.subjects.indexOf(n) < 0) D.subjects.push(n); });
         if (b.goalMin > 0) { D.goalMin = b.goalMin; $("goal").value = D.goalMin; }
